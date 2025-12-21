@@ -6,9 +6,16 @@
 
 ### Вариант 1: Развертывание через Git репозиторий (рекомендуется)
 
-1. **Подключите репозиторий** в Coolify
-2. Coolify автоматически определит `Dockerfile`
-3. Настройте переменные окружения (см. ниже)
+1. **Убедитесь, что `package-lock.json` закоммичен** в репозиторий
+   ```bash
+   git add package-lock.json
+   git commit -m "Add package-lock.json"
+   git push
+   ```
+
+2. **Подключите репозиторий** в Coolify
+3. Coolify автоматически определит `Dockerfile` и `docker-compose.yaml`
+4. Настройте переменные окружения (см. ниже)
 
 ### Вариант 2: Развертывание через Docker Compose
 
