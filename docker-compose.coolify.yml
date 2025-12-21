@@ -1,0 +1,25 @@
+# Docker Compose конфигурация для Coolify
+# В Coolify MongoDB обычно развертывается как отдельный сервис
+# Этот файл содержит только приложение
+
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-3000}
+      # В Coolify MongoDB будет доступна через внутреннюю сеть
+      # Укажите MONGODB_URI в переменных окружения Coolify
+      - MONGODB_URI=${MONGODB_URI}
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:${PORT:-3000}/api/health', (r) => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+

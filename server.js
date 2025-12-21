@@ -3,7 +3,9 @@ const mongoose = require('mongoose');
 require('dotenv').config();
 
 const app = express();
+// Поддержка динамического порта для Coolify и других PaaS
 const PORT = process.env.PORT || 3000;
+// MONGODB_URI должен быть установлен через переменные окружения в Coolify
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongodb:27017/helloworld';
 
 // Middleware
@@ -245,9 +247,11 @@ function formatUptime(seconds) {
 }
 
 // Запуск сервера
-app.listen(PORT, async () => {
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
-  console.log(`📊 Откройте http://localhost:${PORT} для просмотра`);
+  console.log(`📊 Приложение доступно на порту ${PORT}`);
+  console.log(`🔗 MongoDB URI: ${MONGODB_URI.replace(/\/\/.*@/, '//***:***@')}`); // Скрываем пароль в логах
+  console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
   await connectDB();
 });
 

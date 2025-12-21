@@ -1,0 +1,18 @@
+# Coolify конфигурация (опционально)
+# Этот файл может использоваться Coolify для дополнительных настроек
+
+build:
+  dockerfile: Dockerfile
+  context: .
+
+environment:
+  - NODE_ENV=production
+  - PORT=3000
+  # MONGODB_URI должен быть установлен в UI Coolify
+
+healthcheck:
+  path: /api/health
+  interval: 30
+  timeout: 10
+  retries: 3
+
