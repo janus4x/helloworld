@@ -217,9 +217,14 @@
         async function fetchData(url) {
             try {
                 const response = await fetch(url);
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error(`Ошибка запроса ${url}:`, response.status, errorText);
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
                 return await response.json();
             } catch (error) {
+                console.error(`Ошибка при загрузке ${url}:`, error);
                 return { error: error.message };
             }
         }
@@ -373,6 +378,17 @@
         async function loadHealthCheck() {
             const data = await fetchData('/api/health');
             const container = document.getElementById('healthCheck');
+            
+            if (data.error || !data.checks) {
+                container.innerHTML = `
+                    <div class="status-badge status-error">ОШИБКА</div>
+                    <div class="info-item">
+                        <span class="info-label">Ошибка:</span>
+                        <span class="info-value">${data.error || 'Неизвестная ошибка'}</span>
+                    </div>
+                `;
+                return;
+            }
             
             const dbStatus = data.checks.database === 'ok' ? 'status-ok' : 'status-error';
             const serverStatus = data.checks.server === 'ok' ? 'status-ok' : 'status-error';
