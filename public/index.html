@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hello World CI/CD Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 3em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .card h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.5em;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+
+        .status-ok {
+            background: #4caf50;
+            color: white;
+        }
+
+        .status-error {
+            background: #f44336;
+            color: white;
+        }
+
+        .status-warning {
+            background: #ff9800;
+            color: white;
+        }
+
+        .info-item {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: #666;
+        }
+
+        .info-value {
+            color: #333;
+            font-family: 'Courier New', monospace;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .refresh-btn {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 10px 5px;
+            transition: background 0.3s ease;
+        }
+
+        .refresh-btn:hover {
+            background: #5568d3;
+        }
+
+        .visits-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .visit-item {
+            padding: 8px;
+            margin: 5px 0;
+            background: #f9f9f9;
+            border-radius: 5px;
+            font-size: 0.9em;
+            border-left: 3px solid #667eea;
+        }
+
+        .footer {
+            text-align: center;
+            color: white;
+            margin-top: 30px;
+            opacity: 0.8;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Hello World CI/CD</h1>
+            <p>Мониторинг и статистика приложения</p>
+        </div>
+
+        <div style="text-align: center; margin-bottom: 20px;">
+            <button class="refresh-btn" onclick="loadAllData()">🔄 Обновить данные</button>
+            <span id="lastUpdate" class="info-value" style="color: white; margin-left: 20px;"></span>
+        </div>
+
+        <div class="dashboard">
+            <!-- Статус системы -->
+            <div class="card">
+                <h2>📊 Статус системы</h2>
+                <div id="systemStatus" class="loading">Загрузка...</div>
+            </div>
+
+            <!-- MongoDB статус -->
+            <div class="card">
+                <h2>🍃 MongoDB</h2>
+                <div id="mongodbStatus" class="loading">Загрузка...</div>
+            </div>
+
+            <!-- Статистика приложения -->
+            <div class="card">
+                <h2>📈 Статистика</h2>
+                <div id="appStats" class="loading">Загрузка...</div>
+            </div>
+
+            <!-- Health Check -->
+            <div class="card">
+                <h2>🏥 Health Check</h2>
+                <div id="healthCheck" class="loading">Загрузка...</div>
+            </div>
+
+            <!-- Последние визиты -->
+            <div class="card" style="grid-column: span 2;">
+                <h2>👥 Последние визиты</h2>
+                <div id="visits" class="loading">Загрузка...</div>
+            </div>
+        </div>
+
+        <div class="footer">
+            <p>Node.js + Docker + MongoDB CI/CD Test Project</p>
+        </div>
+    </div>
+
+    <script>
+        async function fetchData(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return await response.json();
+            } catch (error) {
+                return { error: error.message };
+            }
+        }
+
+        function formatDate(dateString) {
+            if (!dateString) return 'N/A';
+            const date = new Date(dateString);
+            return date.toLocaleString('ru-RU');
+        }
+
+        async function loadSystemStatus() {
+            const data = await fetchData('/api/system');
+            const container = document.getElementById('systemStatus');
+            
+            if (data.error) {
+                container.innerHTML = `<div class="status-badge status-error">Ошибка: ${data.error}</div>`;
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="info-item">
+                    <span class="info-label">Node.js версия:</span>
+                    <span class="info-value">${data.nodeVersion}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Платформа:</span>
+                    <span class="info-value">${data.platform} (${data.arch})</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Время работы:</span>
+                    <span class="info-value">${data.uptime.formatted}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Память (RSS):</span>
+                    <span class="info-value">${data.memory.rss}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Heap Used:</span>
+                    <span class="info-value">${data.memory.heapUsed}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">PID:</span>
+                    <span class="info-value">${data.pid}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Окружение:</span>
+                    <span class="info-value">${data.env}</span>
+                </div>
+            `;
+        }
+
+        async function loadMongoDBStatus() {
+            const data = await fetchData('/api/mongodb');
+            const container = document.getElementById('mongodbStatus');
+            
+            if (data.error || !data.connected) {
+                container.innerHTML = `
+                    <div class="status-badge status-error">Отключено</div>
+                    ${data.error ? `<div class="info-item"><span class="info-label">Ошибка:</span><span class="info-value">${data.error}</span></div>` : ''}
+                `;
+                return;
+            }
+
+            const info = data.info || {};
+            container.innerHTML = `
+                <div class="status-badge status-ok">Подключено</div>
+                <div class="info-item">
+                    <span class="info-label">Хост:</span>
+                    <span class="info-value">${info.host || 'N/A'}:${info.port || 'N/A'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">База данных:</span>
+                    <span class="info-value">${info.database || 'N/A'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Коллекции:</span>
+                    <span class="info-value">${info.collections ? info.collections.length : 0}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Всего визитов:</span>
+                    <span class="info-value">${info.visitCount || 0}</span>
+                </div>
+                ${info.serverVersion ? `
+                <div class="info-item">
+                    <span class="info-label">Версия MongoDB:</span>
+                    <span class="info-value">${info.serverVersion}</span>
+                </div>
+                ` : ''}
+                <div class="info-item">
+                    <span class="info-label">Время подключения:</span>
+                    <span class="info-value">${formatDate(data.connectionTime)}</span>
+                </div>
+            `;
+        }
+
+        async function loadAppStats() {
+            const data = await fetchData('/api/stats');
+            const container = document.getElementById('appStats');
+            
+            if (data.error) {
+                container.innerHTML = `<div class="status-badge status-error">Ошибка: ${data.error}</div>`;
+                return;
+            }
+
+            const startTime = new Date(data.startTime);
+            const currentTime = new Date(data.currentTime);
+            const uptime = Math.floor((currentTime - startTime) / 1000);
+
+            container.innerHTML = `
+                <div class="info-item">
+                    <span class="info-label">Время запуска:</span>
+                    <span class="info-value">${formatDate(data.startTime)}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Всего запросов:</span>
+                    <span class="info-value">${data.totalRequests || 0}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">API вызовов:</span>
+                    <span class="info-value">${data.apiCalls || 0}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Health checks:</span>
+                    <span class="info-value">${data.healthChecks || 0}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Всего визитов:</span>
+                    <span class="info-value">${data.visitCount || 0}</span>
+                </div>
+            `;
+
+            // Отображение последних визитов
+            const visitsContainer = document.getElementById('visits');
+            if (data.lastVisits && data.lastVisits.length > 0) {
+                visitsContainer.innerHTML = `
+                    <div class="visits-list">
+                        ${data.lastVisits.map(visit => `
+                            <div class="visit-item">
+                                <strong>${formatDate(visit.timestamp)}</strong> - 
+                                IP: ${visit.ip || 'N/A'} - 
+                                ${visit.userAgent ? visit.userAgent.substring(0, 50) + '...' : 'N/A'}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            } else {
+                visitsContainer.innerHTML = '<div class="info-item">Пока нет визитов</div>';
+            }
+        }
+
+        async function loadHealthCheck() {
+            const data = await fetchData('/api/health');
+            const container = document.getElementById('healthCheck');
+            
+            const dbStatus = data.checks.database === 'ok' ? 'status-ok' : 'status-error';
+            const serverStatus = data.checks.server === 'ok' ? 'status-ok' : 'status-error';
+            const overallStatus = data.status === 'ok' ? 'status-ok' : 'status-error';
+
+            container.innerHTML = `
+                <div class="status-badge ${overallStatus}">${data.status.toUpperCase()}</div>
+                <div class="info-item">
+                    <span class="info-label">База данных:</span>
+                    <span class="status-badge ${dbStatus}">${data.checks.database}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Сервер:</span>
+                    <span class="status-badge ${serverStatus}">${data.checks.server}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Время проверки:</span>
+                    <span class="info-value">${formatDate(data.timestamp)}</span>
+                </div>
+            `;
+        }
+
+        async function loadAllData() {
+            document.getElementById('lastUpdate').textContent = `Последнее обновление: ${formatDate(new Date())}`;
+            await Promise.all([
+                loadSystemStatus(),
+                loadMongoDBStatus(),
+                loadAppStats(),
+                loadHealthCheck()
+            ]);
+        }
+
+        // Загрузка данных при загрузке страницы
+        loadAllData();
+
+        // Автообновление каждые 5 секунд
+        setInterval(loadAllData, 5000);
+    </script>
+</body>
+</html>
+
