@@ -1,6 +1,10 @@
 # Nixpacks конфигурация для автоматической сборки
 # Nixpacks автоматически определит Node.js проект и установит зависимости
 # Версия Node.js определяется из .nvmrc или package.json engines
+#
+# ⚠️ ВАЖНО: MongoDB НЕ включается в Nixpacks сборку!
+# MongoDB должна быть развернута как ОТДЕЛЬНЫЙ сервис в Coolify
+# См. MONGODB-SETUP.md для подробных инструкций
 
 # Команда запуска приложения
 [start]
@@ -10,4 +14,9 @@ cmd = "node server.js"
 # - Определит Node.js из package.json или .nvmrc
 # - Установит зависимости через npm install
 # - Создаст оптимизированный Docker образ
+#
+# Переменные окружения (установите в Coolify):
+# - MONGODB_URI=mongodb://mongodb:27017/helloworld (где mongodb - имя вашего MongoDB сервиса)
+# - NODE_ENV=production
+# - PORT=3000
 
