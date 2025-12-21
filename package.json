@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Hello World проект для тестирования CI/CD стека: Node.js + Docker + MongoDB",
   "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "nodemon server.js",
@@ -12,7 +16,8 @@
     "nodejs",
     "docker",
     "mongodb",
-    "cicd"
+    "cicd",
+    "nixpacks"
   ],
   "author": "",
   "license": "MIT",
