@@ -217,11 +217,13 @@
         async function fetchData(url) {
             try {
                 const response = await fetch(url);
-                if (!response.ok) {
+                // Для health check 503 - это валидный ответ (сервис работает, но не полностью здоров)
+                if (!response.ok && response.status !== 503) {
                     const errorText = await response.text();
                     console.error(`Ошибка запроса ${url}:`, response.status, errorText);
                     throw new Error(`HTTP ${response.status}: ${errorText}`);
                 }
+                // Парсим JSON даже для 503 статуса
                 return await response.json();
             } catch (error) {
                 console.error(`Ошибка при загрузке ${url}:`, error);
@@ -376,39 +378,59 @@
         }
 
         async function loadHealthCheck() {
-            const data = await fetchData('/api/health');
-            const container = document.getElementById('healthCheck');
-            
-            if (data.error || !data.checks) {
+            try {
+                const response = await fetch('/api/health');
+                // Health check может вернуть 503, но это валидный ответ
+                const data = await response.json();
+                const container = document.getElementById('healthCheck');
+                
+                if (!data.checks) {
+                    container.innerHTML = `
+                        <div class="status-badge status-error">ОШИБКА</div>
+                        <div class="info-item">
+                            <span class="info-label">Ошибка:</span>
+                            <span class="info-value">Неверный формат ответа</span>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const dbStatus = data.checks.database === 'ok' ? 'status-ok' : 'status-error';
+                const serverStatus = data.checks.server === 'ok' ? 'status-ok' : 'status-error';
+                // Общий статус зависит от всех проверок
+                const overallStatus = (data.checks.database === 'ok' && data.checks.server === 'ok') ? 'status-ok' : 'status-warning';
+
+                container.innerHTML = `
+                    <div class="status-badge ${overallStatus}">${overallStatus === 'status-ok' ? 'OK' : 'DEGRADED'}</div>
+                    <div class="info-item">
+                        <span class="info-label">База данных:</span>
+                        <span class="status-badge ${dbStatus}">${data.checks.database === 'ok' ? 'OK' : 'ERROR'}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Сервер:</span>
+                        <span class="status-badge ${serverStatus}">${data.checks.server === 'ok' ? 'OK' : 'ERROR'}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Время проверки:</span>
+                        <span class="info-value">${formatDate(data.timestamp)}</span>
+                    </div>
+                    ${data.checks.database !== 'ok' ? `
+                    <div class="info-item" style="margin-top: 10px; padding: 10px; background: #fff3cd; border-radius: 5px;">
+                        <span style="color: #856404;">⚠️ MongoDB не подключена. Проверьте docker-compose или настройки подключения.</span>
+                    </div>
+                    ` : ''}
+                `;
+            } catch (error) {
+                const container = document.getElementById('healthCheck');
                 container.innerHTML = `
                     <div class="status-badge status-error">ОШИБКА</div>
                     <div class="info-item">
                         <span class="info-label">Ошибка:</span>
-                        <span class="info-value">${data.error || 'Неизвестная ошибка'}</span>
+                        <span class="info-value">${error.message}</span>
                     </div>
                 `;
-                return;
+                console.error('Ошибка загрузки health check:', error);
             }
-            
-            const dbStatus = data.checks.database === 'ok' ? 'status-ok' : 'status-error';
-            const serverStatus = data.checks.server === 'ok' ? 'status-ok' : 'status-error';
-            const overallStatus = data.status === 'ok' ? 'status-ok' : 'status-error';
-
-            container.innerHTML = `
-                <div class="status-badge ${overallStatus}">${data.status.toUpperCase()}</div>
-                <div class="info-item">
-                    <span class="info-label">База данных:</span>
-                    <span class="status-badge ${dbStatus}">${data.checks.database}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Сервер:</span>
-                    <span class="status-badge ${serverStatus}">${data.checks.server}</span>
-                </div>
-                <div class="info-item">
-                    <span class="info-label">Время проверки:</span>
-                    <span class="info-value">${formatDate(data.timestamp)}</span>
-                </div>
-            `;
         }
 
         async function loadAllData() {

@@ -17,19 +17,51 @@ let dbStatus = {
   connectionTime: null
 };
 
-const connectDB = async () => {
-  try {
-    await mongoose.connect(MONGODB_URI);
-    dbStatus.connected = true;
-    dbStatus.error = null;
-    dbStatus.connectionTime = new Date().toISOString();
-    console.log('✅ MongoDB подключена успешно');
-  } catch (error) {
-    dbStatus.connected = false;
-    dbStatus.error = error.message;
-    console.error('❌ Ошибка подключения к MongoDB:', error.message);
+const connectDB = async (retries = 5, delay = 2000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await mongoose.connect(MONGODB_URI, {
+        serverSelectionTimeoutMS: 5000,
+        socketTimeoutMS: 45000,
+      });
+      dbStatus.connected = true;
+      dbStatus.error = null;
+      dbStatus.connectionTime = new Date().toISOString();
+      console.log('✅ MongoDB подключена успешно');
+      return;
+    } catch (error) {
+      dbStatus.connected = false;
+      dbStatus.error = error.message;
+      console.error(`❌ Попытка ${i + 1}/${retries} подключения к MongoDB не удалась:`, error.message);
+      
+      if (i < retries - 1) {
+        console.log(`⏳ Повторная попытка через ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else {
+        console.error('❌ Не удалось подключиться к MongoDB после всех попыток');
+      }
+    }
   }
 };
+
+// Обработка событий подключения
+mongoose.connection.on('connected', () => {
+  dbStatus.connected = true;
+  dbStatus.error = null;
+  dbStatus.connectionTime = new Date().toISOString();
+  console.log('✅ MongoDB подключена (событие)');
+});
+
+mongoose.connection.on('error', (err) => {
+  dbStatus.connected = false;
+  dbStatus.error = err.message;
+  console.error('❌ Ошибка MongoDB:', err.message);
+});
+
+mongoose.connection.on('disconnected', () => {
+  dbStatus.connected = false;
+  console.log('⚠️ MongoDB отключена');
+});
 
 // Модель для хранения статистики
 const VisitSchema = new mongoose.Schema({
