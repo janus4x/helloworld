@@ -129,8 +129,11 @@ helloworld/
 │   └── index.html              # Главная страница
 ├── .dockerignore
 ├── .gitignore
-├── docker-compose.yml          # Docker Compose конфигурация
+├── docker-compose.yml          # Docker Compose для локальной разработки (с MongoDB)
+├── docker-compose.yaml         # Docker Compose для Coolify (только приложение)
+├── docker-compose.coolify.yml  # Альтернативная конфигурация для Coolify
 ├── Dockerfile                  # Docker образ приложения
+├── COOLIFY.md                  # Инструкция по развертыванию в Coolify
 ├── package.json
 ├── server.js                   # Основной сервер
 └── README.md
