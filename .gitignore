@@ -8,3 +8,6 @@ node_modules/
 dist/
 build/
 
+# Локальные файлы с секретами/переменными окружения (для Coolify и т.п.)
+coolify*.env
+
