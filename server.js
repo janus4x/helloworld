@@ -93,17 +93,59 @@ app.use((req, res, next) => {
   next();
 });
 
+// Функция для сохранения визита (асинхронная, не блокирует ответ)
+const saveVisit = async (req) => {
+  // Проверяем готовность БД более надежно
+  // readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
+  const isDbReady = dbStatus.connected && mongoose.connection.readyState === 1;
+  
+  if (!isDbReady) {
+    // Если БД не готова, пытаемся подключиться только если соединение не установлено и не в процессе
+    if (mongoose.connection.readyState === 0) {
+      // Соединение не установлено, пытаемся подключиться (быстрая попытка)
+      try {
+        await mongoose.connect(MONGODB_URI, {
+          serverSelectionTimeoutMS: 2000,
+          socketTimeoutMS: 45000,
+        });
+        // Если подключение успешно, продолжаем сохранение
+      } catch (error) {
+        // БД недоступна, пропускаем сохранение визита
+        return;
+      }
+    } else {
+      // БД в процессе подключения или отключения, пропускаем сохранение
+      return;
+    }
+  }
+
+  // Проверяем еще раз после возможного подключения
+  if (mongoose.connection.readyState !== 1) {
+    return;
+  }
+
+  try {
+    const clientIp = req.ip || 
+                     req.connection.remoteAddress || 
+                     req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                     'unknown';
+    
+    const visit = new Visit({
+      ip: clientIp,
+      userAgent: req.get('user-agent') || 'unknown'
+    });
+    await visit.save();
+    console.log('✅ Визит сохранен:', visit.ip, new Date(visit.timestamp).toLocaleString('ru-RU'));
+  } catch (error) {
+    console.error('❌ Ошибка сохранения визита:', error.message);
+  }
+};
+
 // Главная страница
 app.get('/', async (req, res) => {
   try {
-    // Сохраняем визит в БД
-    if (dbStatus.connected) {
-      const visit = new Visit({
-        ip: req.ip || req.connection.remoteAddress,
-        userAgent: req.get('user-agent')
-      });
-      await visit.save().catch(err => console.error('Ошибка сохранения визита:', err));
-    }
+    // Сохраняем визит в БД (асинхронно, не блокируя ответ)
+    saveVisit(req).catch(err => console.error('Ошибка в saveVisit:', err));
     
     res.sendFile(__dirname + '/public/index.html');
   } catch (error) {
@@ -184,7 +226,8 @@ app.get('/api/stats', async (req, res) => {
   let visitCount = 0;
   let lastVisits = [];
   
-  if (dbStatus.connected) {
+  // Проверяем готовность БД более надежно
+  if (dbStatus.connected && mongoose.connection.readyState === 1) {
     try {
       visitCount = await Visit.countDocuments();
       lastVisits = await Visit.find()
