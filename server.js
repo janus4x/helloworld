@@ -77,6 +77,47 @@ mongoose.connection.on('disconnected', () => {
   console.log('⚠️ MongoDB отключена');
 });
 
+// Инициализация таблицы visits в PostgreSQL
+const initPostgreSQLTables = async () => {
+  if (!pgPool || !pgStatus.connected) {
+    return;
+  }
+
+  try {
+    const client = await pgPool.connect();
+    
+    // Создаем таблицу visits, если её нет
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS visits (
+        id SERIAL PRIMARY KEY,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        ip VARCHAR(45),
+        user_agent TEXT,
+        url VARCHAR(500),
+        referer VARCHAR(500),
+        method VARCHAR(10),
+        accept_language VARCHAR(100),
+        accept_encoding VARCHAR(100)
+      )
+    `);
+
+    // Создаем индекс для быстрого поиска по timestamp
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_visits_timestamp ON visits(timestamp DESC)
+    `);
+
+    // Создаем индекс для поиска по IP
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_visits_ip ON visits(ip)
+    `);
+
+    client.release();
+    console.log('✅ Таблица visits в PostgreSQL инициализирована');
+  } catch (error) {
+    console.error('❌ Ошибка инициализации таблицы visits в PostgreSQL:', error.message);
+  }
+};
+
 // PostgreSQL Connection
 const connectPostgreSQL = async () => {
   if (!POSTGRES_URI) {
@@ -104,6 +145,9 @@ const connectPostgreSQL = async () => {
     pgStatus.error = null;
     pgStatus.connectionTime = new Date().toISOString();
     console.log('✅ PostgreSQL подключена успешно');
+
+    // Инициализируем таблицы после успешного подключения
+    await initPostgreSQLTables();
 
     // Обработка ошибок пула
     pgPool.on('error', (err) => {
@@ -155,8 +199,26 @@ app.use((req, res, next) => {
   next();
 });
 
-// Функция для сохранения визита (асинхронная, не блокирует ответ)
-const saveVisit = async (req) => {
+// Функция для сбора данных о визите
+const collectVisitData = (req) => {
+  const clientIp = req.ip || 
+                   req.connection.remoteAddress || 
+                   req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+                   'unknown';
+  
+  return {
+    ip: clientIp,
+    userAgent: req.get('user-agent') || 'unknown',
+    url: req.originalUrl || req.url || '/',
+    referer: req.get('referer') || req.get('referrer') || null,
+    method: req.method || 'GET',
+    acceptLanguage: req.get('accept-language') || null,
+    acceptEncoding: req.get('accept-encoding') || null
+  };
+};
+
+// Функция для сохранения визита в MongoDB
+const saveVisitToMongoDB = async (visitData) => {
   // Проверяем готовность БД более надежно
   // readyState: 0 = disconnected, 1 = connected, 2 = connecting, 3 = disconnecting
   const isDbReady = dbStatus.connected && mongoose.connection.readyState === 1;
@@ -173,42 +235,99 @@ const saveVisit = async (req) => {
         // Если подключение успешно, продолжаем сохранение
       } catch (error) {
         // БД недоступна, пропускаем сохранение визита
-        return;
+        return false;
       }
     } else {
       // БД в процессе подключения или отключения, пропускаем сохранение
-      return;
+      return false;
     }
   }
 
   // Проверяем еще раз после возможного подключения
   if (mongoose.connection.readyState !== 1) {
-    return;
+    return false;
   }
 
   try {
-    const clientIp = req.ip || 
-                     req.connection.remoteAddress || 
-                     req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
-                     'unknown';
-    
     const visit = new Visit({
-      ip: clientIp,
-      userAgent: req.get('user-agent') || 'unknown'
+      ip: visitData.ip,
+      userAgent: visitData.userAgent
     });
     await visit.save();
-    console.log('✅ Визит сохранен:', visit.ip, new Date(visit.timestamp).toLocaleString('ru-RU'));
+    console.log('✅ Визит сохранен в MongoDB:', visitData.ip, new Date().toLocaleString('ru-RU'));
+    return true;
   } catch (error) {
-    console.error('❌ Ошибка сохранения визита:', error.message);
+    console.error('❌ Ошибка сохранения визита в MongoDB:', error.message);
+    return false;
   }
 };
+
+// Функция для сохранения визита в PostgreSQL
+const saveVisitToPostgreSQL = async (visitData) => {
+  if (!pgPool || !pgStatus.connected) {
+    return false;
+  }
+
+  try {
+    const client = await pgPool.connect();
+    
+    await client.query(
+      `INSERT INTO visits (ip, user_agent, url, referer, method, accept_language, accept_encoding)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [
+        visitData.ip,
+        visitData.userAgent,
+        visitData.url,
+        visitData.referer,
+        visitData.method,
+        visitData.acceptLanguage,
+        visitData.acceptEncoding
+      ]
+    );
+
+    client.release();
+    console.log('✅ Визит сохранен в PostgreSQL:', visitData.ip, new Date().toLocaleString('ru-RU'));
+    return true;
+  } catch (error) {
+    console.error('❌ Ошибка сохранения визита в PostgreSQL:', error.message);
+    // Если таблицы нет, пытаемся её создать
+    if (error.message.includes('relation') && error.message.includes('does not exist')) {
+      try {
+        await initPostgreSQLTables();
+        // Повторяем попытку сохранения после создания таблицы
+        return await saveVisitToPostgreSQL(visitData);
+      } catch (initError) {
+        console.error('❌ Ошибка создания таблицы:', initError.message);
+      }
+    }
+    return false;
+  }
+};
+
+// Главная функция для сохранения визита (сохраняет в обе БД параллельно)
+const saveVisit = async (req) => {
+  // Собираем данные о визите
+  const visitData = collectVisitData(req);
+
+  // Сохраняем в обе БД параллельно (не блокируем друг друга)
+  Promise.all([
+    saveVisitToMongoDB(visitData).catch(err => console.error('Ошибка MongoDB:', err)),
+    saveVisitToPostgreSQL(visitData).catch(err => console.error('Ошибка PostgreSQL:', err))
+  ]).catch(err => console.error('Ошибка при сохранении визита:', err));
+};
+
+// Middleware для сохранения визитов (для всех запросов, кроме API)
+app.use((req, res, next) => {
+  // Сохраняем визит только для основных страниц, не для API endpoints
+  if (!req.path.startsWith('/api/')) {
+    saveVisit(req).catch(err => console.error('Ошибка в saveVisit:', err));
+  }
+  next();
+});
 
 // Главная страница
 app.get('/', async (req, res) => {
   try {
-    // Сохраняем визит в БД (асинхронно, не блокируя ответ)
-    saveVisit(req).catch(err => console.error('Ошибка в saveVisit:', err));
-    
     res.sendFile(__dirname + '/public/index.html');
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -333,6 +452,17 @@ app.get('/api/postgresql', async (req, res) => {
       );
       const tables = tablesResult.rows.map(row => row.table_name);
       
+      // Получаем количество визитов, если таблица существует
+      let visitCount = 0;
+      if (tables.includes('visits')) {
+        try {
+          const visitCountResult = await client.query('SELECT COUNT(*) as count FROM visits');
+          visitCount = parseInt(visitCountResult.rows[0].count);
+        } catch (err) {
+          console.error('Ошибка подсчета визитов:', err);
+        }
+      }
+      
       client.release();
       
       pgInfo = {
@@ -342,7 +472,8 @@ app.get('/api/postgresql', async (req, res) => {
         activeConnections: activeConnections,
         dbSize: dbSize,
         tables: tables,
-        tableCount: tables.length
+        tableCount: tables.length,
+        visitCount: visitCount
       };
     } catch (error) {
       pgInfo = {
@@ -369,9 +500,44 @@ app.get('/api/postgresql', async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   let visitCount = 0;
   let lastVisits = [];
+  let dbSource = 'none';
   
-  // Проверяем готовность БД более надежно
-  if (dbStatus.connected && mongoose.connection.readyState === 1) {
+  // Приоритет: PostgreSQL (если доступен), затем MongoDB
+  if (pgStatus.connected && pgPool) {
+    try {
+      const client = await pgPool.connect();
+      
+      // Получаем общее количество визитов
+      const countResult = await client.query('SELECT COUNT(*) as count FROM visits');
+      visitCount = parseInt(countResult.rows[0].count);
+      
+      // Получаем последние 10 визитов
+      const visitsResult = await client.query(
+        `SELECT timestamp, ip, user_agent, url, referer, method 
+         FROM visits 
+         ORDER BY timestamp DESC 
+         LIMIT 10`
+      );
+      
+      lastVisits = visitsResult.rows.map(row => ({
+        timestamp: row.timestamp,
+        ip: row.ip,
+        userAgent: row.user_agent,
+        url: row.url,
+        referer: row.referer,
+        method: row.method
+      }));
+      
+      client.release();
+      dbSource = 'postgresql';
+    } catch (error) {
+      console.error('Ошибка получения статистики из PostgreSQL:', error);
+      // Если ошибка, пробуем MongoDB
+    }
+  }
+  
+  // Если PostgreSQL не доступен, пробуем MongoDB
+  if (dbSource === 'none' && dbStatus.connected && mongoose.connection.readyState === 1) {
     try {
       visitCount = await Visit.countDocuments();
       lastVisits = await Visit.find()
@@ -379,8 +545,9 @@ app.get('/api/stats', async (req, res) => {
         .limit(10)
         .select('timestamp ip userAgent')
         .lean();
+      dbSource = 'mongodb';
     } catch (error) {
-      console.error('Ошибка получения статистики:', error);
+      console.error('Ошибка получения статистики из MongoDB:', error);
     }
   }
   
@@ -388,6 +555,7 @@ app.get('/api/stats', async (req, res) => {
     ...appStats,
     visitCount: visitCount,
     lastVisits: lastVisits,
+    dbSource: dbSource,
     currentTime: new Date().toISOString()
   });
 });

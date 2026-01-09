@@ -383,6 +383,12 @@
                         <span class="info-label">Таблиц:</span>
                         <span class="info-value">${info.tableCount || 0}</span>
                     </div>
+                    ${info.visitCount !== undefined ? `
+                    <div class="info-item">
+                        <span class="info-label">Всего визитов:</span>
+                        <span class="info-value">${info.visitCount}</span>
+                    </div>
+                    ` : ''}
                     ${data.connectionTime ? `
                     <div class="info-item">
                         <span class="info-label">Время подключения:</span>
@@ -443,19 +449,36 @@
             // Отображение последних визитов
             const visitsContainer = document.getElementById('visits');
             if (data.lastVisits && data.lastVisits.length > 0) {
+                const dbSourceInfo = data.dbSource ? `<div style="margin-bottom: 10px; padding: 5px; background: #e3f2fd; border-radius: 5px; font-size: 0.9em;"><strong>Источник данных:</strong> ${data.dbSource === 'postgresql' ? 'PostgreSQL' : data.dbSource === 'mongodb' ? 'MongoDB' : 'N/A'}</div>` : '';
+                
                 visitsContainer.innerHTML = `
+                    ${dbSourceInfo}
                     <div class="visits-list">
-                        ${data.lastVisits.map(visit => `
-                            <div class="visit-item">
-                                <strong>${formatDate(visit.timestamp)}</strong> - 
-                                IP: ${visit.ip || 'N/A'} - 
-                                ${visit.userAgent ? visit.userAgent.substring(0, 50) + '...' : 'N/A'}
-                            </div>
-                        `).join('')}
+                        ${data.lastVisits.map(visit => {
+                            const url = visit.url || '';
+                            const method = visit.method || '';
+                            const referer = visit.referer || '';
+                            const userAgent = visit.userAgent || 'N/A';
+                            
+                            return `
+                                <div class="visit-item">
+                                    <div style="margin-bottom: 5px;">
+                                        <strong>${formatDate(visit.timestamp)}</strong>
+                                        ${method ? ` <span style="background: #667eea; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em; margin-left: 5px;">${method}</span>` : ''}
+                                    </div>
+                                    <div style="font-size: 0.9em; color: #666;">
+                                        <div><strong>IP:</strong> ${visit.ip || 'N/A'}</div>
+                                        ${url ? `<div><strong>URL:</strong> ${url.length > 60 ? url.substring(0, 60) + '...' : url}</div>` : ''}
+                                        ${referer ? `<div><strong>Откуда:</strong> ${referer.length > 50 ? referer.substring(0, 50) + '...' : referer}</div>` : ''}
+                                        <div><strong>User Agent:</strong> ${userAgent.length > 60 ? userAgent.substring(0, 60) + '...' : userAgent}</div>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('')}
                     </div>
                 `;
             } else {
-                visitsContainer.innerHTML = '<div class="info-item">Пока нет визитов</div>';
+                visitsContainer.innerHTML = '<div class="info-item">Пока нет визитов. Данные будут собираться автоматически при посещении сайта.</div>';
             }
         }
 
