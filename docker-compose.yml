@@ -19,6 +19,26 @@ services:
       timeout: 5s
       retries: 5
 
+  postgresql:
+    image: postgres:16-alpine
+    container_name: helloworld-postgresql
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: helloworld
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgresql_data:/var/lib/postgresql/data
+    networks:
+      - helloworld-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   app:
     build: .
     container_name: helloworld-app
@@ -29,8 +49,11 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - MONGODB_URI=mongodb://mongodb:27017/helloworld
+      - POSTGRES_URI=postgresql://postgres:postgres@postgresql:5432/helloworld
     depends_on:
       mongodb:
+        condition: service_healthy
+      postgresql:
         condition: service_healthy
     networks:
       - helloworld-network
@@ -43,6 +66,8 @@ services:
 
 volumes:
   mongodb_data:
+    driver: local
+  postgresql_data:
     driver: local
 
 networks:

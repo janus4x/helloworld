@@ -1,5 +1,6 @@
 const express = require('express');
 const mongoose = require('mongoose');
+const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
@@ -7,6 +8,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 // MONGODB_URI должен быть установлен через переменные окружения в Coolify
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongodb:27017/helloworld';
+// PostgreSQL connection string через переменную окружения
+const POSTGRES_URI = process.env.POSTGRES_URI || process.env.DATABASE_URL;
 
 // Middleware
 app.use(express.json());
@@ -18,6 +21,15 @@ let dbStatus = {
   error: null,
   connectionTime: null
 };
+
+// PostgreSQL Connection
+let pgStatus = {
+  connected: false,
+  error: null,
+  connectionTime: null
+};
+
+let pgPool = null;
 
 const connectDB = async (retries = 5, delay = 2000) => {
   for (let i = 0; i < retries; i++) {
@@ -64,6 +76,56 @@ mongoose.connection.on('disconnected', () => {
   dbStatus.connected = false;
   console.log('⚠️ MongoDB отключена');
 });
+
+// PostgreSQL Connection
+const connectPostgreSQL = async () => {
+  if (!POSTGRES_URI) {
+    pgStatus.connected = false;
+    pgStatus.error = 'POSTGRES_URI не установлен';
+    console.log('⚠️ PostgreSQL URI не установлен, пропускаем подключение');
+    return;
+  }
+
+  try {
+    pgPool = new Pool({
+      connectionString: POSTGRES_URI,
+      // Настройки пула подключений
+      max: 10, // максимальное количество клиентов в пуле
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
+
+    // Тестируем подключение
+    const client = await pgPool.connect();
+    await client.query('SELECT NOW()');
+    client.release();
+
+    pgStatus.connected = true;
+    pgStatus.error = null;
+    pgStatus.connectionTime = new Date().toISOString();
+    console.log('✅ PostgreSQL подключена успешно');
+
+    // Обработка ошибок пула
+    pgPool.on('error', (err) => {
+      pgStatus.connected = false;
+      pgStatus.error = err.message;
+      console.error('❌ Ошибка PostgreSQL пула:', err.message);
+    });
+  } catch (error) {
+    pgStatus.connected = false;
+    pgStatus.error = error.message;
+    console.error('❌ Ошибка подключения к PostgreSQL:', error.message);
+    // Закрываем пул при ошибке
+    if (pgPool) {
+      try {
+        await pgPool.end();
+        pgPool = null;
+      } catch (err) {
+        console.error('Ошибка закрытия пула PostgreSQL:', err);
+      }
+    }
+  }
+};
 
 // Модель для хранения статистики
 const VisitSchema = new mongoose.Schema({
@@ -221,6 +283,88 @@ app.get('/api/mongodb', async (req, res) => {
   });
 });
 
+// API для получения статуса PostgreSQL
+app.get('/api/postgresql', async (req, res) => {
+  let pgInfo = null;
+  
+  if (!POSTGRES_URI) {
+    pgInfo = {
+      status: 'not_configured',
+      error: 'POSTGRES_URI не установлен в переменных окружения'
+    };
+    res.json({
+      ...pgStatus,
+      info: pgInfo
+    });
+    return;
+  }
+
+  if (pgStatus.connected && pgPool) {
+    try {
+      const client = await pgPool.connect();
+      
+      // Получаем информацию о версии PostgreSQL
+      const versionResult = await client.query('SELECT version()');
+      const version = versionResult.rows[0].version;
+      
+      // Получаем текущую базу данных
+      const dbResult = await client.query('SELECT current_database()');
+      const database = dbResult.rows[0].current_database;
+      
+      // Получаем количество активных подключений
+      const connectionsResult = await client.query(
+        'SELECT count(*) as count FROM pg_stat_activity WHERE state = $1',
+        ['active']
+      );
+      const activeConnections = parseInt(connectionsResult.rows[0].count);
+      
+      // Получаем размер базы данных
+      const sizeResult = await client.query(
+        'SELECT pg_size_pretty(pg_database_size($1)) as size',
+        [database]
+      );
+      const dbSize = sizeResult.rows[0].size;
+      
+      // Получаем список таблиц
+      const tablesResult = await client.query(
+        `SELECT table_name FROM information_schema.tables 
+         WHERE table_schema = 'public' 
+         ORDER BY table_name`
+      );
+      const tables = tablesResult.rows.map(row => row.table_name);
+      
+      client.release();
+      
+      pgInfo = {
+        status: 'connected',
+        database: database,
+        version: version,
+        activeConnections: activeConnections,
+        dbSize: dbSize,
+        tables: tables,
+        tableCount: tables.length
+      };
+    } catch (error) {
+      pgInfo = {
+        status: 'error',
+        error: error.message
+      };
+      pgStatus.connected = false;
+      pgStatus.error = error.message;
+    }
+  } else {
+    pgInfo = {
+      status: 'disconnected',
+      error: pgStatus.error || 'Не подключено'
+    };
+  }
+  
+  res.json({
+    ...pgStatus,
+    info: pgInfo
+  });
+});
+
 // API для получения статистики приложения
 app.get('/api/stats', async (req, res) => {
   let visitCount = 0;
@@ -254,12 +398,17 @@ app.get('/api/health', (req, res) => {
     status: 'ok',
     timestamp: new Date().toISOString(),
     checks: {
-      database: dbStatus.connected ? 'ok' : 'error',
+      mongodb: dbStatus.connected ? 'ok' : 'error',
+      postgresql: POSTGRES_URI ? (pgStatus.connected ? 'ok' : 'error') : 'not_configured',
       server: 'ok'
     }
   };
   
-  const statusCode = health.checks.database === 'ok' ? 200 : 503;
+  // Определяем общий статус: ok если все настроенные БД подключены
+  const allConfiguredDBsOk = health.checks.mongodb === 'ok' && 
+    (health.checks.postgresql === 'ok' || health.checks.postgresql === 'not_configured');
+  
+  const statusCode = allConfiguredDBsOk ? 200 : 503;
   res.status(statusCode).json(health);
 });
 
@@ -294,14 +443,23 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 Сервер запущен на порту ${PORT}`);
   console.log(`📊 Приложение доступно на порту ${PORT}`);
   console.log(`🔗 MongoDB URI: ${MONGODB_URI.replace(/\/\/.*@/, '//***:***@')}`); // Скрываем пароль в логах
+  if (POSTGRES_URI) {
+    console.log(`🐘 PostgreSQL URI: ${POSTGRES_URI.replace(/\/\/.*@/, '//***:***@')}`); // Скрываем пароль в логах
+  } else {
+    console.log(`⚠️ PostgreSQL URI не установлен (POSTGRES_URI или DATABASE_URL)`);
+  }
   console.log(`🌍 NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
   await connectDB();
+  await connectPostgreSQL();
 });
 
 // Graceful shutdown
 process.on('SIGTERM', async () => {
   console.log('SIGTERM получен, закрываем соединения...');
   await mongoose.connection.close();
+  if (pgPool) {
+    await pgPool.end();
+  }
   process.exit(0);
 });
 
